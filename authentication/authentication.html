@@ -1,0 +1,139 @@
+<h2 id="authentication">Authentication</h2>
+<p>Authentication is the mechanism which confirms the identity of users trying to access a system. In order for a user to be granted access to a resource, they must first prove that they are who they claim to be. Generally this is handled by passing a key with each request (often called an access token). The server verifies that the access token is genuine, that the user does indeed have the required privileges to access the requested resource, and only then is the requset granted.</p>
+<p>There are many ways to grant a user an access token. The most common is a password challenge. Passwords should be stored with a one way encryption hash, so that even if a malicious intruder obtains access to the user database, they still won't have access to user passwords.</p>
+<h3 id="passwords">Passwords</h3>
+<p>Passwords should be stored with a one way encryption hash, so that even if a malicious intruder obtains access to the user database, they still won't have access to user passwords.</p>
+<p>The hash should be sufficiently long not just to prevent an attack from a single machine, but to prevent an attack from a large cluster of machines.</p>
+<p>Worms targeting vulnerable versions of popular website platforms such as WordPress and Drupal have become common. Once such a worm takes control of a website and installs its payload, it can recruit all of the site's traffic into a JavaScript botnet, and, among other things, use visitor CPU power to crack stolen password databases which fail to implement the security precautions outlined here.</p>
+<p>There are botnets that exist today with <a href="http://www.forbes.com/sites/anthonykosner/2013/04/13/wordpress-under-attack-how-to-avoid-the-coming-botnet/">over 90,000 nodes</a>. Such botnets could crack MD5 password hashes at a rate of nine billion per second.</p>
+<p>Passwords are vulnerable to the following common attacks:</p>
+<ul>
+<li>Rainbow tables</li>
+<li>Brute force</li>
+<li>Variable time equality</li>
+<li>Passwords stolen from third parties</li>
+</ul>
+<h4 id="rainbow-tables">Rainbow tables</h4>
+<p>Rainbow tables are precomputed tables used to look up passwords using stolen hashes. Once bad guys get their hands on user passwords, they'll attempt to attack popular services such as email and bank accounts -- which spells very bad PR for your service.</p>
+<p>There are <a href="http://www.codinghorror.com/blog/2007/09/rainbow-hash-cracking.html">rainbow tables that exist today</a> which can discover almost every possible password up to 14 characters. To prevent password theft by rainbow table, users should choose <a href="http://en.wikipedia.org/wiki/Rainbow_table">passwords of at least 14 characters</a>. Sadly, such passwords are definitely not convenient, particularly on mobile devices. In other words, you should not rely on users to select appropriate passwords.</p>
+<p>Rainbow tables can significantly reduce the time it takes to find a password, at the cost of memory, but with terrabyte hard drives and gigabytes of RAM, it's a trade off that is easily made. That said, it is possible to protect your service against rainbow table attacks.</p>
+<h5 id="password-salts">Password Salts</h5>
+<p>One defence you can employ against rainbow tables is password salting. A salt is a sequence of random characters that gets paired with a password during the hashing process. Salts should be cryptographically secure random values of a length equal to the hash size. Salts are not secrets, and can be safely stored in plaintext alongside the user's other credentials.</p>
+<p>Salting can protect passwords in a couple of ways:</p>
+<p>First, a uniquely generated salt can protect your password databases against existing rainbow tables. Using a random salt makes your site immune from these attacks. However, if you use the same salt for every password, a new rainbow table can be generated to attack the password database.</p>
+<p>Second, if two different users use the same password, the compromised password will grant access to both user accounts. To prevent that, you must use a unique salt for each password. Doing so makes a rainbow table attack impractical.</p>
+<p>Node.js supplies a suitable random generator called <code>crypto.randomBytes()</code>. It returns a buffer, so you'll need to wrap it to get a suitable salt string:</p>
+<pre class="js"><code>/**
+ * createSalt(keylength, callback) callback(err, salt)
+ *
+ * Generates a cryptographically secure random string for
+ * use as a password salt using Node's built-in
+ * crypto.randomBytes().
+ *
+ * @param  {Number} keyLength
+ * @param  {Function} callback 
+ * @return {undefined}
+ */
+var createSalt = function createSalt(keyLength, callback) {
+  crypto.randomBytes(keyLength, function (err, buff) {
+    if (err) {
+      return callback(err);
+    }
+    callback(null, buff.toString('base64'));
+  });
+};</code></pre>
+<p>The operation is asynchronous because the cryptographically secure random number generator takes time to collect enough entropy to complete the operation.</p>
+<h4 id="brute-force">Brute force</h4>
+<p>Rainbow tables get all the blogger attention, but Moore's Law is alive and well, and brute force has become a very real threat. Attackers are employing GPUs, super computing clusters that cost less than $2,000, and JavaScript botnets comprised of tens of thousands of browsers visiting infected websites.</p>
+<p>A brute force attack will attempt to crack a password by attempting a match using every possible character combination. A simple single-iteration hash can be tested at the rate of millions of hashes per second on modern systems.</p>
+<p>One way to thwart brute force attacks is to programatically lock a user's account after a handful of failed login attempts. However, that strategy won't protect passwords if an attacker gains access to the password database.</p>
+<p>Key stretching can make brute force attacks impractical by increasing the time it takes to hash the password. This can be done by applying the hash function in a loop. The delay will be relatively unnoticed by a user trying to sign in, but will significantly hamper an attacker attempting to discover a password through brute force.</p>
+<p>You should not simply pick a random hash function and apply it in a loop. It's too easy to unwittingly open up attack vectors. Instead, use an established standard for iterative hashing, such as bcrypt or PBKDF2.</p>
+<p>I discovered 100 hashes in less than 1ms using a simple MD5 algorithm, and then tried the same thing with Node's built-in <code>crypto.pbkdf2()</code> function (HMAC-SHA1) set to 80,000 iterations. PBKDF2 took 15.48 seconds. To a user performing a single login attempt per response, the slow down is barely noticed, but it slows brute force to a crawl.</p>
+<p>Usage is deceptively simple:</p>
+<pre class="js"><code>crypto.pbkdf2(password, salt,
+  iterations, keyLength, function (err, hash) {
+    if (err) {
+      return callback(err);
+    }
+    callback(null, new Buffer(hash).toString('base64'));
+  });  </code></pre>
+<p>However, there are important considerations that shouldn't be overlooked, such as generating the appropriate unique, crytographically secure random salt of the right length, and calculating the number of iterations in order to balance user experience and security.</p>
+<h4 id="variable-time-equality">Variable time equality</h4>
+<p>If it takes your service longer to say no to a slightly wrong password than a mostly wrong password, attackers can use that data to guess the password, similar to how you guess a word playing hangman. You might think that random time delays and network timing jitter would sufficiently mask those timing differences, but it turns out an attacker just needs to take more timing samples to filter out the noise and obtain statistically relevant timing data:</p>
+<p>From Crosby et al. "Opportunities And Limits Of Remote Timing Attacks":</p>
+<blockquote>
+<p>We have shown that, even though the Internet induces significant timing jitter, we can reliably distinguish remote timing differences as low as 20µs. A LAN environment has lower timing jitter, allowing us to reliably distinguish remote timing differences as small as 100ns (possibly even smaller). These precise timing differences can be distinguished with only hundreds or possibly thousands of measurements.</p>
+</blockquote>
+<p>The best way to beat these attacks is to use a constant time hash equality check, rather than an optimized check. That is easily achieved by iterating through the full hash before returning the answer, regardless of how soon the answer is known.</p>
+<p>For more information, see <a href="http://codahale.com/a-lesson-in-timing-attacks/">Coda Hale's "A Lesson in Timing Attacks"</a>.</p>
+<p>Here is an example of a constant time string equality algorithm in JavaScript:</p>
+<pre class="js"><code>/**
+ * constantEquals(x, y)
+ *
+ * Compare two strings, x and y with a constant time
+ * algorithm to prevent attacks based on timing statistics.
+ */
+constantEquals = function constantEquals(x, y) {
+  var result = true,
+    length = (x.length > y.length) ? x.length : y.length,
+    i;
+
+  for (i=0; i<length; i++) {
+    if (x.charCodeAt(i) !== y.charCodeAt(i)) {
+      result = false;
+    }
+  }
+  return result;
+};</code></pre>
+<h4 id="stolen-passwords">Stolen passwords</h4>
+<p>By far the biggest threat to password security is the fact that these tactics have already worked against other websites, and users have a tendency to reuse passwords across different sites. Since you don't have access to the user's other accounts for verification, there's little you can do to enforce unique passwords on your website.</p>
+<p>As you have seen, passwords alone are an ineffective authentication system, but they can still be useful in combination with other authentication factors.</p>
+<h3 id="credential">Credential</h3>
+<p>I searched for a suitable open source password authentication module in NPM, but I couldn't find one that met all of the criteria you should consider when you're implementing password authentication in your applications. This is a critical component of your system security, so it's important to get it right. I created a library to make it easy.</p>
+<p>Install credential:</p>
+<pre><code>$ npm install --save credential</code></pre>
+<p><code>.hash()</code>:</p>
+<pre class="js"><code>var pw = require('credential'),
+  newPassword = 'I have a really great password.';
+
+pw.hash(newPassword, function (err, hash) {
+  if (err) { throw err; }
+  console.log('Store the password hash.', hash);
+});</code></pre>
+<p><code>.verify()</code>:</p>
+<pre class="js"><code>var pw = require('credential'),
+  storedHash = '{"hash":...', // truncated to fit on page
+  userInput = 'I have a really great password.';
+
+pw.verify(storedHash, userInput, function (err, isValid) {
+  var msg;
+  if (err) { throw err; }
+  msg = isValid ? 'Passwords match!' : 'Wrong password.';
+  console.log(msg);
+});</code></pre>
+<h3 id="multi-factor-authentication">Multi-factor authentication</h3>
+<p>Because of the threat of stolen passwords, any policy which relies solely on password protection is unsafe. In order to protect your system from intruders, another line of defense is necessary.</p>
+<p>Multi-factor authentication is an authentication strategy which requires the user to present authentication proof from two or more authentication factors: The knowledge factor (something the user knows: password, etc...), the possession factor (something the user has: mobile phone, etc...), and the inherence factor (something the user is, fingerprint, etc...).</p>
+<h4 id="knowledge-factor">Knowledge factor</h4>
+<p>A common secondary security mechanism that was widely implemented in the financial industry just a few years ago are "security questions". Pairing a password with security questions does not qualify as multi-factor authentication, though, because you need the user to pass challenges from two or more authentication factors. Using multilpe knowledge factor challenges does not prevent a determined snoop from breaking in.</p>
+<p>Multi-factor authentication means that an attacker would have to be both a snoop and a thief, for instance.</p>
+<h4 id="posession-factor">Posession factor</h4>
+<p>For corporate and government intranets, it's common to require some type of physical token or key to grant access to systems. Mechanisms include USB dongles, flash card keys, etc...</p>
+<p>OTPs (One Time Passwords) are short-lived passwords that work only for a single use. They satisfy the posession factor because they're usually generated by a dedicated piece of hardware, or by an app on the user's mobile phone. The device is paired with the service that is being authenticated against in a way that cannot be easily spoofed by imposters.</p>
+<p>Google released a product called Google Authenticator that generates one time passwords for mobile devices. There is a node module called <code>speakeasy</code> that lets you take advantage of Google authenticator to authenticate users using the posession factor.</p>
+<p>Install Speakeasy:</p>
+<pre><code>$ npm install --save speakeasy</code></pre>
+<p>Then take it for a spin:</p>
+<pre class="js"><code>var speakeasy = require('speakeasy');
+
+// Returns a key object with ascii, hex, base32 and
+// QR code representations (the QR code value is a
+// Google image URL):
+var key = speakeasy.generate_key({
+  length: 20,
+  google_auth_qr: true
+});
+
+// This should match the number on your phone:
+speakeasy.time({key: key.base32, encoding: 'base32'});</code></pre>
